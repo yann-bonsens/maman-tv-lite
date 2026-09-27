@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+# Maman TV Lite - the box's HDMI output, asleep while the box is idle.
+#
+# Started by the API to stop driving the screen, stopped to drive it again.
+# Active means asleep.
+#
+# Why: a television that comes back on "the last input used" comes back on the
+# box after music or photos, and its owner gets a technical screen instead of
+# their programmes. No CEC frame fixes it — on the set this was measured on,
+# Set Stream Path came back as Feature Abort, unrecognised opcode, and thirteen
+# other frames were ignored. What does fix it is having no signal on that input
+# when the set wakes: it falls back to its own programmes.
+#
+# Asleep, not disconnected. Forcing the connector off makes the kernel forget
+# the set's EDID, and it can only read it back from a set that answers — which
+# a television that unplugs its input while it sleeps never does. That is what
+# left a box unable to send a single CEC frame at the installation site, with
+# the television having to be switched on by hand. Putting the output to sleep
+# never touches the connector, so that cannot happen on any set.
+#
+# A unit rather than a write from the API, because /sys/class/graphics/fb0/blank
+# belongs to root and the API runs with NoNewPrivileges. The polkit rule grants
+# that account exactly "start" and "stop" of this one unit.
+#
+# Never enabled: there is deliberately no [Install] section. Started at boot it
+# would leave the television with no picture at all.
+
+[Unit]
+Description=Maman TV Lite - HDMI output asleep while the box is idle
+
+[Service]
+Type=oneshot
+# Active for as long as the output sleeps, so "stop" is what wakes it and
+# `systemctl is-active` says which state the box is in.
+RemainAfterExit=yes
+# 4 is FB_BLANK_POWERDOWN: the encoder stops, the connector stays connected,
+# the kernel keeps the EDID and the CEC address. Measured on 2026-09-23: the
+# television reported an absent source while the box kept phys_addr 1.0.0.0.
+ExecStart=/bin/sh -c 'echo 4 > /sys/class/graphics/fb0/blank'
+ExecStop=/bin/sh -c 'echo 0 > /sys/class/graphics/fb0/blank'
+TimeoutSec=20

@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+[Unit]
+Description=Maman TV Lite - Zigbee2MQTT
+After=network-online.target mosquitto.service
+Wants=network-online.target mosquitto.service
+# Without an adapter this simply never starts — "inactive (condition
+# failed)", not a failure, so Restart=always below never applies and
+# nothing is retried. This is what makes it safe to enable unconditionally
+# (see scripts/install.sh) and to let api/button_pairing.py's installation-
+# screen bootstrap call `systemctl restart` freely: on a box with no
+# adapter plugged in, or one just unplugged since the last boot, the call
+# costs nothing and burns no CPU. Without this, a missing or unrecognised
+# adapter crash-loops the service — measured at ~50s of CPU per attempt,
+# 318 consecutive attempts once pinning a Pi 1 at load 2 until the hardware
+# watchdog rebooted it twice (see CLAUDE.md).
+ConditionPathExistsGlob=/dev/serial/by-id/*
+
+[Service]
+# ============================================================================
+# Nothing on this box outranks the buttons
+# ----------------------------------------------------------------------------
+# ASH, the protocol between this process and an EFR32 adapter, has hard
+# acknowledgement deadlines. Starved of CPU, Node does not answer in time and
+# the adapter gives up — "Adapter disconnected, stopping" — after which the
+# buttons do nothing at all until the service has restarted, which costs about
+# a minute of CPU on this board.
+#
+# Measured, and not theoretical: giving this service CPUWeight=20 alongside a
+# CPUWeight=10000 API dropped the adapter FIFTEEN SECONDS after the music
+# started, and the next press on the green button was simply never received.
+# The interface is the buttons; the music is what they are for.
+CPUWeight=10000
+IOWeight=1000
+Type=simple
+# __MAMAN_USER__ and __MAMAN_HOME__ are replaced by scripts/install.sh with
+# the account that ran it.
+User=__MAMAN_USER__
+Group=__MAMAN_USER__
+WorkingDirectory=__MAMAN_HOME__/maman-tv-lite/zigbee2mqtt
+# __NODE_BIN__: /opt/nodejs/bin/node on the 32-bit image, /usr/bin/node on the
+# 64-bit one; scripts/install.sh says which.
+ExecStart=__NODE_BIN__ index.js
+Restart=always
+RestartSec=10
+TimeoutStopSec=10
+
+# Hardening (least privilege)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=__MAMAN_HOME__/maman-tv-lite/zigbee2mqtt/data
+
+[Install]
+WantedBy=multi-user.target

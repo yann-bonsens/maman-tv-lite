@@ -1,0 +1,15 @@
+-r requirements.txt
+pytest==8.3.4
+# The linter CI runs. Pinned like everything else: a linter that changes its mind
+# between a local run and CI is a linter nobody trusts.
+ruff==0.14.0
+httpx==0.28.1
+# Pillow is deliberately NOT in requirements.txt: on the board the installer
+# uses Debian's python3-pil, which is prebuilt for armv6l, and the venv is
+# created with --system-site-packages so it sees it. No armv6l wheel exists,
+# so a pip Pillow there would try to compile from source on a Pi 1.
+#
+# It belongs here all the same. page_render imports PIL at module level and
+# conftest imports page_render, so without it the whole suite fails to
+# collect — on a Mac and in CI alike, where there is no python3-pil.
+Pillow==11.3.0

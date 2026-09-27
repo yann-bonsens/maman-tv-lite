@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Which Zigbee button does what. EXAMPLE file: the real one lives in",
+    "/etc/maman-tv-lite/buttons.json, outside the repository, so that updating",
+    "the code never changes what a button does.",
+    "",
+    "scripts/setup-zigbee.py writes this file for you by watching a real",
+    "button being pressed. Action names differ between models, so learning",
+    "them beats guessing: single, double, hold, on, toggle, 1_single...",
+    "",
+    "Keys are device names as Zigbee2MQTT publishes them, on the topic",
+    "zigbee2mqtt/<name>. The special key \"*\" matches any device, and a",
+    "device's own entry wins over it.",
+    "",
+    "Commands must come from the COMMANDS whitelist in api/zigbee_bridge.py;",
+    "list them with ./scripts/setup-zigbee.py --list-commands. An unknown",
+    "name is logged and ignored, never executed.",
+    "",
+    "After editing by hand: sudo systemctl restart maman-api"
+  ],
+  "bindings": {
+    "*": {
+      "single": "power_toggle"
+    },
+    "living-room-button": {
+      "single": "power_toggle",
+      "double": "channel_up",
+      "hold": "mute"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+# Two layers, and only one of them runs by default.
+#
+# The unit layer is 684 tests in about seven seconds, which is a suite somebody
+# runs after every edit. The integration layer executes real binaries — the
+# screen's own bash script, and a fake `cec-ctl` driven by a model television —
+# and costs five times as much for a twentieth of the tests, because almost all
+# of it is process startup.
+#
+# Excluded by default so the fast loop stays fast, and **never excluded in CI**:
+# a test nobody runs is worse than no test, so the workflow runs both layers as
+# separate steps and a local run says out loud what it skipped.
+addopts = "-m 'not integration'"
+markers = [
+    "integration: runs real binaries; slow. Run with `pytest -m integration`, and CI always does.",
+]

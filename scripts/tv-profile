@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+# Switch the box between televisions by copying one file. Runs on the box.
+#
+# Everything the box knows about its television lives in one place,
+# /var/lib/maman-tv-lite/tv.json. A profile is a copy of that file, kept in
+# profiles/ in this repository. Switching is a copy — no code knows that
+# profiles exist, and nothing on the box changes shape.
+#
+# **Nothing is restarted.** `tv_config.load()` opens that file on every call,
+# so a profile applies to the next button press. Checked, not assumed.
+#
+# CEC is not a reliable standard: which frame wakes a set, which switches it
+# off, and whether anything hands the viewer back their programmes all vary by
+# model. There is no way to know but to try, with somebody in front of the
+# screen — about a quarter of an hour on the installation screen. A profile is
+# the result of that quarter of an hour, so the next person with the same
+# television does not have to spend it. See profiles/README.md.
+#
+#   tv-profile                    what the box is using, and what is available
+#   tv-profile show SAMSUNG_0x7590
+#   tv-profile use SAMSUNG_0x7590
+#   tv-profile save               capture what the box has, named from the set
+
+set -euo pipefail
+
+# Beside this script when run from a clone, or where the installer put it.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for candidate in "$HERE/../profiles" "$HOME/maman-tv-lite/profiles" \
+                 "/home/maman-tv/maman-tv-lite/profiles"; do
+    [ -d "$candidate" ] && { PROFILES_DIR="$(cd "$candidate" && pwd)"; break; }
+done
+PROFILES_DIR="${MAMAN_PROFILES_DIR:-${PROFILES_DIR:-$HOME/maman-tv-lite/profiles}}"
+
+STATE_DIR="${STATE_DIRECTORY:-/var/lib/maman-tv-lite}"
+LIVE="$STATE_DIR/tv.json"
+
+usage() {
+    sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    echo
+    echo "Profiles: $PROFILES_DIR"
+    echo "In force: $LIVE"
+}
+
+profile_path() { echo "$PROFILES_DIR/${1%.json}.json"; }
+
+# A malformed file is not an error the box reports: tv_config falls back to
+# the defaults and says so only in the log. So it is refused here, before it
+# can quietly become a box that has forgotten which television it is on.
+check_readable() {
+    local path="$1"
+    [ -f "$path" ] || { echo "No such profile: $path" >&2; exit 1; }
+    python3 -m json.tool "$path" >/dev/null 2>&1 \
+        || { echo "$path is not valid JSON." >&2; exit 1; }
+    python3 - "$path" <<'CHECK' || exit 1
+import json, sys
+config = json.load(open(sys.argv[1]))
+missing = [k for k in ("wake", "sleep", "release", "hdmi_sleep") if k not in config]
+if missing:
+    print(f"{sys.argv[1]} has no {', '.join(missing)}.", file=sys.stderr)
+    sys.exit(1)
+CHECK
+}
+
+summarise() {
+    python3 - "$1" <<'SUMMARY'
+import json, sys
+config = json.load(open(sys.argv[1]))
+for kind in ("wake", "sleep", "release"):
+    entry = config.get(kind, {})
+    print(f"  {kind:<8} {entry.get('technique','?')} ({entry.get('source','?')})")
+print(f"  {'sleep by':<8} {config.get('hdmi_sleep','?')}")
+television = config.get("television") or {}
+identity = " ".join(str(television.get(k, "")) for k in
+                    ("manufacturer", "product", "name")).strip()
+print(f"  {'for':<8} {identity or 'unspecified'}")
+SUMMARY
+}
+
+# NAME_PRODUCT, as the set reports itself over HDMI. Anything outside
+# [A-Za-z0-9._-] becomes a dash: a filename has to survive a shell, and an
+# EDID name is whatever the manufacturer felt like putting there.
+name_from_identity() {
+    python3 - "$1" <<'IDENTITY'
+import json, re, sys
+television = json.load(open(sys.argv[1])).get("television") or {}
+parts = [str(television.get(key, "")).strip() for key in ("name", "product")]
+parts = [re.sub(r"[^A-Za-z0-9._-]+", "-", part) for part in parts if part]
+print("_".join(parts))
+IDENTITY
+}
+
+case "${1:-list}" in
+    list)
+        if [ -f "$LIVE" ]; then
+            echo "In force:"
+            summarise "$LIVE"
+            echo
+        fi
+        [ -d "$PROFILES_DIR" ] || { echo "No profiles at $PROFILES_DIR."; exit 0; }
+        found=0
+        for path in "$PROFILES_DIR"/*.json; do
+            [ -e "$path" ] || break
+            found=1
+            echo "$(basename "$path" .json):"
+            summarise "$path"
+        done
+        [ "$found" -eq 1 ] || echo "No profiles at $PROFILES_DIR."
+        ;;
+
+    show)
+        path="$(profile_path "${2:?which profile? try: tv-profile list}")"
+        check_readable "$path"
+        cat "$path"
+        ;;
+
+    use)
+        path="$(profile_path "${2:?which profile? try: tv-profile list}")"
+        check_readable "$path"
+        if [ ! -w "$STATE_DIR" ]; then
+            echo "Cannot write $STATE_DIR as $(id -un)." >&2
+            echo "Try:  sudo -u ${MAMAN_SERVICE_USER:-maman-tv} tv-profile use ${2}" >&2
+            exit 1
+        fi
+        echo "Putting this in force:"
+        summarise "$path"
+        # The box's own copy is kept, timestamped, first. This command is the
+        # only thing that overwrites a measurement somebody stood in front of
+        # a television to make.
+        if [ -f "$LIVE" ]; then
+            backup="$LIVE.bak-$(date +%Y%m%d-%H%M%S)"
+            cp -p "$LIVE" "$backup"
+            echo "  (the previous one is at $(basename "$backup"))"
+        fi
+        # Written beside the real file and renamed, so a full disk or an
+        # interrupted copy cannot leave half a configuration behind.
+        install -m 644 "$path" "$LIVE.new"
+        mv "$LIVE.new" "$LIVE"
+        echo
+        echo "Done. Nothing needs restarting: the box reads this file on every"
+        echo "press, so it applies to the next one."
+        ;;
+
+    save)
+        [ -f "$LIVE" ] || { echo "$LIVE does not exist yet." >&2; exit 1; }
+        check_readable "$LIVE"
+        name="${2:-$(name_from_identity "$LIVE")}"
+        if [ -z "$name" ]; then
+            echo "The box does not know which television it is on, so there is" >&2
+            echo "no name to give this. Run the installation screen's CEC" >&2
+            echo "procedure first, or pass a name yourself." >&2
+            exit 1
+        fi
+        mkdir -p "$PROFILES_DIR"
+        path="$(profile_path "$name")"
+        [ -e "$path" ] && { echo "$path already exists." >&2; exit 1; }
+        install -m 644 "$LIVE" "$path"
+        echo "Saved as $(basename "$path"):"
+        summarise "$path"
+        echo
+        echo "It is in $PROFILES_DIR on this box. Copy it to a clone and open a"
+        echo "pull request if the television is one somebody else might have."
+        ;;
+
+    -h|--help|help) usage ;;
+    *) echo "Unknown command: $1" >&2; usage >&2; exit 1 ;;
+esac

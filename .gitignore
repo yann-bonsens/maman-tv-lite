@@ -1,0 +1,46 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.idea/
+.DS_Store
+*.log
+cache/
+
+# Internal working journal: stays local, out of the public repository.
+docs/journal.md
+
+# Card images and their notes. Gigabyte-sized, and a backup of a working card
+# carries every secret on it: the API password, SSH keys, the WiFi key and the
+# Zigbee network key.
+images/
+*.img
+*.img.gz
+
+# Working notes and raw bus captures for one television: raw material, not
+# documentation, and specific to one set in one flat.
+high-one/
+
+# Belt and braces. None of these belong in the repository — the real ones live
+# in /etc/maman-tv-lite and /var/lib/maman-tv-lite — but nothing stopped one
+# being copied here to be edited and then committed.
+api.env
+*.env
+!config/api.env.example
+buttons.json
+!config/buttons.json.example
+tv.json
+media.json
+logging.json
+cec-learned.json
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+known_hosts
+
+# Where scripts/push-to-pi.sh sends the code (one developer's box).
+.push-to-pi.conf
+
+# Personal helper scripts, kept out of the repository.
+scripts/local-*

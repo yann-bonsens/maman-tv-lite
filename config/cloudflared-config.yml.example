@@ -1,0 +1,27 @@
+# Cloudflare tunnel configuration for Maman TV Lite.
+#
+# This file is an EXAMPLE. The real one lives in /etc/cloudflared/config.yml,
+# outside the git repository (it references a tunnel identifier).
+#
+# The two REPLACE placeholders below are filled in after
+# `cloudflared tunnel create maman-tv-lite`, which prints the tunnel identifier
+# and the path to the credentials file.
+
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_ID.json
+
+# cloudflared uses QUIC (UDP 7844) by default and falls back to TCP 443 when
+# it is blocked. Managed networks often filter outbound UDP: if the tunnel
+# struggles to come up, uncomment this to force TCP.
+#protocol: http2
+
+ingress:
+  # Pick a subdomain that cannot be guessed: only the API password
+  # protects access, so the address itself should not be stumbled upon.
+  # For example k7m2x9.example.com rather than maman-tv-lite.example.com
+  - hostname: REPLACE.example.com
+    service: http://localhost:8000
+
+  # Anything that does not match the rule above gets a 404: nothing else on
+  # the machine is exposed.
+  - service: http_status:404

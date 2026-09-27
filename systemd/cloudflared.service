@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+[Unit]
+Description=Maman TV Lite - Cloudflare tunnel (exposes the API without opening a port)
+# The tunnel is outbound: the Pi connects to Cloudflare, never the reverse. No
+# port forwarding on the router, and it works even behind CGNAT.
+After=network-online.target
+Wants=network-online.target
+# No cap on the number of attempts: after a long outage the tunnel must keep
+# trying indefinitely. Nobody will be on site to restart it by hand.
+StartLimitIntervalSec=0
+
+[Service]
+# cloudflared implements sd_notify (checked in the binary: NOTIFY_SOCKET and
+# READY=1), so systemd really knows when the tunnel is established.
+Type=notify
+# --no-autoupdate: ProtectSystem=strict makes /usr read-only, so the automatic
+# update would fail anyway and fill the journal with errors. Updates are done
+# deliberately, not on their own on an unattended machine.
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel --config /etc/cloudflared/config.yml run
+Restart=always
+RestartSec=10
+
+# The tunnel credentials live in /etc/cloudflared (mode 700, root): the
+# <UUID>.json file created by `cloudflared tunnel create` grants access to the
+# tunnel. It must never leave the machine nor enter the git repository.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

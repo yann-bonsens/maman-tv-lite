@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+#
+# What the box is doing, from a shell.
+#
+#   maman-tv status     what the box is doing, in a few lines
+#   maman-tv report     everything needed to diagnose it from a distance
+#   maman-tv screen     draw the diagnostic page on the television
+#
+# `status` reads the file the API publishes and talks to nothing: it answers
+# even when the API is wedged. `report` adds what only the system can say —
+# services, the HDMI connector, the CEC adapter, the journal — and writes it
+# to a file worth sending to somebody.
+#
+# Written after an evening spent reconstructing, by hand and from a journal
+# that had already been vacuumed, what one command could have said in ten
+# seconds.
+
+set -uo pipefail
+
+STATE_FILE="${STATE_FILE:-/run/maman-tv-lite/state.json}"
+CONFIG_FILE="${MAMAN_TV_CONFIG:-/var/lib/maman-tv-lite/tv.json}"
+FIFO="${RUNTIME_DIR:-/run/maman-tv-lite}/screen"
+
+usage() {
+  awk '/^#!/ || /^# SPDX/ || /^# Copyright/ { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
+}
+
+status() {
+  python3 - "$STATE_FILE" <<'PYEOF'
+import json, sys, time
+try:
+    state = json.load(open(sys.argv[1]))
+except Exception as exc:
+    print(f"no published state ({exc}); is maman-api running?"); raise SystemExit(1)
+config = state.get("configuration", {})
+tele = config.get("television") or {}
+print(f"mode              {state.get('mode')}   since {(state.get('mode_since') or {}).get('clock', '?')}")
+print(f"hdmi output       {state.get('hdmi')} (sleep method: {config.get('hdmi_sleep', '?')})")
+print(f"television        power {state.get('tv_power')} (read {(state.get('tv_power_at') or {}).get('clock', 'never')})")
+# "release" too: it decides what the tv button does while the music plays,
+# and it was reported nowhere at all.
+for kind in ("wake", "sleep", "release"):
+    entry = config.get(kind, {})
+    # <18, not <15: "release technique" is seventeen characters and broke the
+    # column the moment it was added.
+    print(f"{kind + ' technique':<18}{entry.get('technique', '?')} ({entry.get('source', '?')})")
+identity = " ".join(str(tele.get(k, "")) for k in ("manufacturer", "product", "name")).strip()
+print(f"set configured    {identity or 'unknown — the detection has never run'}")
+print(f"setup             {'completed' if config.get('detection_complete') else 'NEVER COMPLETED'}")
+print("\nlast events")
+for event in state.get("events", [])[-8:]:
+    at = event.get("at", {})
+    details = " ".join(f"{k}={v}" for k, v in sorted(event.items()) if k not in ("event", "at"))
+    print(f"  {at.get('clock', '?')}  +{at.get('since_boot', 0):>7.0f}s  {event.get('event')} {details}")
+PYEOF
+}
+
+report() {
+  local out="${1:-/tmp/maman-tv-report-$(date +%Y%m%d-%H%M%S).txt}"
+  {
+    echo "=== maman-tv report"
+    # Both clocks, always: this board has no clock of its own, so after a power
+    # cut it starts with the last time it knew and jumps when the network
+    # answers. Two boots then overlap in the journal, which is exactly how an
+    # evening of diagnosis went wrong in September 2026.
+    printf 'clock            %s\n' "$(date '+%Y-%m-%d %H:%M:%S %z')"
+    printf 'since boot       %s s (booted %s)\n' "$(cut -d' ' -f1 /proc/uptime)" "$(uptime -s)"
+    printf 'host             %s\n' "$(hostname)"
+    echo
+    echo "=== what the box is doing"; status
+    echo
+    echo "=== configuration file ($CONFIG_FILE)"; cat "$CONFIG_FILE" 2>/dev/null || echo "(none: the defaults are in force)"
+    echo
+    echo "=== services"
+    for unit in maman-api maman-screen maman-hdmi-blank zigbee2mqtt mosquitto; do
+      printf '  %-20s %s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null)"
+    done
+    echo
+    echo "=== HDMI connectors"
+    for connector in /sys/class/drm/card*-HDMI-A-*; do
+      [ -e "$connector/status" ] || continue
+      printf '  %-22s status=%s dpms=%s edid=%s bytes\n' "$(basename "$connector")" \
+        "$(cat "$connector/status")" "$(cat "$connector/dpms" 2>/dev/null)" \
+        "$(wc -c < "$connector/edid" 2>/dev/null)"
+    done
+    echo
+    # The adapter the API found the television on: a Pi 4 or 5 has one per
+    # HDMI port. /dev/cec0 until it has found one.
+    local adapter
+    adapter="$(cat /var/lib/maman-tv-lite/cec-adapter 2>/dev/null || true)"
+    adapter="${adapter:-/dev/cec0}"
+    echo "=== CEC adapter ($adapter)"; cec-ctl -d "$adapter" 2>&1 | grep -iE "physical address|logical address|driver|adapter" | sed 's/^/  /'
+    echo
+    echo "=== journal, last 200 lines of the API"
+    journalctl -u maman-api -n 200 --no-pager -o short-precise 2>/dev/null
+  } > "$out" 2>&1
+  echo "written to $out"
+}
+
+case "${1:-status}" in
+  status) status ;;
+  report) shift; report "${1:-}" ;;
+  # A pipe with no reader blocks the writer for ever, so this one is given a
+  # deadline: a command that hangs because a service is down is worse than one
+  # that says the service is down.
+  screen) if timeout 2 sh -c "printf 'diagnostic\n' > '$FIFO'" 2>/dev/null; then
+            echo "asked the screen for the diagnostic page"
+          else
+            echo "the screen service is not listening" >&2; exit 1
+          fi ;;
+  -h|--help|help) usage ;;
+  *) echo "unknown command: $1" >&2; usage; exit 1 ;;
+esac

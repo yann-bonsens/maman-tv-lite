@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+[Unit]
+Description=Maman TV Lite - CEC bus recorder (diagnostic, off by default)
+Documentation=file:///usr/local/share/doc/maman-tv-lite/cec-monitor.sh
+After=multi-user.target
+
+[Service]
+Type=simple
+# Root, and only for this: monitor mode needs CAP_NET_ADMIN. Nothing else here
+# is privileged, and the recorder never transmits.
+ExecStart=/usr/local/bin/cec-monitor
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Created and made writable by systemd, so the unit cannot fail for a missing
+# path — ReadWritePaths= on one that does not exist stops a service from
+# starting at all, which cost an evening once already.
+LogsDirectory=maman-tv-lite
+Restart=on-failure
+RestartSec=30
+
+# Dead last for the core. The buttons are the interface and the API is what they
+# are for; a diagnostic recorder must never take a millisecond from either.
+CPUWeight=20
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

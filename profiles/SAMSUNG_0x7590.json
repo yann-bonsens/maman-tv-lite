@@ -1,0 +1,26 @@
+{
+  "claims_input": true,
+  "detection_complete": true,
+  "detection_cycle_seconds": 90,
+  "detection_step_seconds": 30,
+  "hdmi_sleep": "blank",
+  "release": {
+    "source": "detection",
+    "technique": "power_cycle"
+  },
+  "sleep": {
+    "source": "detection",
+    "technique": "standby_after_active_source"
+  },
+  "television": {
+    "cec_version": "CEC version 1.4",
+    "manufacturer": "SAM",
+    "name": "SAMSUNG",
+    "product": "0x7590"
+  },
+  "tv_button_switches_off": false,
+  "wake": {
+    "source": "detection",
+    "technique": "image_view_on"
+  }
+}

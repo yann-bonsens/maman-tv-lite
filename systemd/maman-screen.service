@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+# Maman TV Lite - the television's screen, drawn on request.
+#
+# Consoles belong to root and the API does not, so this service draws for it:
+# photos, the diagnostic page, the detection page. It blocks on a named pipe
+# and does nothing at all between two requests.
+#
+# What it replaces ran a loop once a second for the life of the machine and
+# repainted the television every five minutes. That cost about 2% of this
+# board's single core for ever, showed technical text to somebody who did not
+# ask for it, and held most of the display faults of September 2026.
+
+[Unit]
+Description=Maman TV Lite - the television's screen, drawn on request
+After=maman-api.service
+
+[Service]
+Type=exec
+ExecStart=__MAMAN_HOME__/maman-tv-lite/scripts/screen.sh
+Restart=always
+RestartSec=5
+
+# Runs as root: every console on this board is root:root 0600, held by a login
+# prompt, and no group grants access to one. That makes the rest of the
+# hardening matter more here than anywhere else, not less.
+NoNewPrivileges=true
+# "full" rather than "strict": /usr, /boot and /etc become read-only, which is
+# everything this service has any business not writing to — it only ever reads
+# a console font out of /usr. "strict" would mount the whole hierarchy
+# read-only including /run, and /run/maman-tv-lite is where this service
+# creates the named pipe it spends its life blocked on, so it would need
+# ReadWritePaths= for that directory and for the media folder before it could
+# start at all. Worth tightening once both can be tested on the board.
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+# No PrivateNetwork= here, however tempting it looks for a service that draws
+# on a television: the diagnostic page's whole reason for existing is to
+# report the network from the screen when nothing else can be reached — it
+# runs ip, ping, curl, tailscale and nc to do it. Cutting the namespace would
+# make that page confidently report a box with no network at all.
+
+[Install]
+WantedBy=multi-user.target

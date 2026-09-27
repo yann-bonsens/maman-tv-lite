@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+version: 5
+
+homeassistant:
+    enabled: false
+
+frontend:
+    enabled: true
+
+mqtt:
+    base_topic: zigbee2mqtt
+    server: "mqtt://localhost"
+
+serial:
+    # TODO: replace with the real path once your Zigbee adapter is plugged in.
+    # Find the stable path with:
+    #   ls -l /dev/serial/by-id/
+    # Always use the /dev/serial/by-id/... form: /dev/ttyUSB0 can change
+    # number between reboots or when another USB serial device is attached.
+    port: /dev/ttyUSB0
+    # Zigbee2MQTT detects the adapter type on its own and this line is not
+    # needed in most cases. Uncomment and set it only when detection fails.
+    # Common values: ember (EFR32 / EmberZNet), zstack (Texas Instruments
+    # CC2652 and CC1352), deconz (ConBee), zboss, zigate.
+    #adapter: ember
+
+advanced:
+    network_key: GENERATE
+    pan_id: GENERATE
+    ext_pan_id: GENERATE

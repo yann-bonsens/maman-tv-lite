@@ -1,0 +1,25 @@
+{
+  "claims_input": false,
+  "detection_complete": true,
+  "detection_cycle_seconds": 90,
+  "detection_step_seconds": 30,
+  "hdmi_sleep": "blank",
+  "release": {
+    "source": "manual",
+    "technique": "power_cycle"
+  },
+  "sleep": {
+    "source": "manual",
+    "technique": "standby"
+  },
+  "television": {
+    "name": "HIGH ONE",
+    "note": "model from the label, not from the EDID: this set's identity has never been read. Run `tv-profile save` on the box once it is plugged into it to get the real one.",
+    "product": "HI3231HD-EL"
+  },
+  "tv_button_switches_off": false,
+  "wake": {
+    "source": "manual",
+    "technique": "text_view_on"
+  }
+}

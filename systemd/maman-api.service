@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+[Unit]
+Description=Maman TV Lite - REST API (TV/CEC control)
+After=network-online.target
+Wants=network-online.target
+# polkit is how this service puts its HDMI output to sleep and wakes it, and
+# how reboot and shutdown reach logind. It is `static` and D-Bus-activated,
+# so nothing pulls it in at boot on its own — it is started on demand, by the
+# first caller that needs it, which is this service.
+#
+# That is a race this service loses on a single core, and it lost it on
+# 2026-09-25: this unit carries CPUWeight=5000 against polkit's default 100,
+# so the very activation it was blocking on could not get scheduled.
+# "Failed to activate service 'org.freedesktop.PolicyKit1': timed out" after
+# 25 seconds, twice, and the box never took control of its own output.
+# Ordering after it removes the race rather than hoping to win it.
+Wants=polkit.service
+After=polkit.service
+
+[Service]
+Type=notify
+# __MAMAN_USER__ and __MAMAN_HOME__ are replaced by scripts/install.sh with
+# the account that ran it. Edit them by hand if you install this unit
+# yourself.
+User=__MAMAN_USER__
+Group=__MAMAN_USER__
+WorkingDirectory=__MAMAN_HOME__/maman-tv-lite/api
+# HTTP Basic credentials (MAMAN_API_USER / MAMAN_API_PASSWORD). The file lives
+# outside the git repository so that a password is never committed; it is
+# created by scripts/install.sh. Without it the API refuses EVERY request with
+# an explicit 503 rather than staying silently open.
+EnvironmentFile=-/etc/maman-tv-lite/api.env
+ExecStart=__MAMAN_HOME__/maman-tv-lite/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+# Anything TV-specific belongs in the EnvironmentFile above, not here: one
+# file to edit, no daemon-reload, and it survives a reinstall. Which CEC
+# technique a given television obeys is not a setting at all any more — it is
+# measured by the installation screen's detection procedure and written to
+# /var/lib/maman-tv-lite/tv.json. See /tv/config on /docs.
+# Creates /var/lib/maman-tv-lite, owned by the service account, and exports it
+# as $STATE_DIRECTORY. Without this, ProtectSystem=strict makes the whole of
+# /var read-only and the box forgets which CEC technique works on every
+# restart — re-running the search on every single press.
+StateDirectory=maman-tv-lite
+# The music and photos players' control socket and the flag that keeps the
+# diagnostic screen off a photo (/run/maman-tv-lite).
+RuntimeDirectory=maman-tv-lite
+# Kept across a restart of this service. The screen service holds the named
+# pipe inside this directory open for the life of the machine; without this,
+# systemd deletes the directory when the API stops, the pipe goes with it, and
+# the screen is left holding a file descriptor nobody can write to — deaf, and
+# silently so.
+RuntimeDirectoryPreserve=yes
+# The media folder chosen at install time; api.env can override it.
+Environment=MAMAN_MEDIA_DIR=__MEDIA_DIR__
+# The one place outside its own directories the service may write: setting a
+# photo or a track aside moves the file into <media>/archive. Everything else
+# stays read-only under ProtectSystem=strict, which is why the whole path is
+# named rather than the hardening loosened.
+#
+# The leading "-" is load-bearing: systemd REFUSES TO START a service whose
+# ReadWritePaths does not exist (measured on the Pi 5 box with a throwaway
+# unit), so without it an install without the media component — or a media
+# folder on a disk that has not mounted yet — would leave the box with no API
+# and no buttons at all.
+ReadWritePaths=-__MEDIA_DIR__
+# The button-binding file. The installation screen's own button-pairing
+# procedure (api/button_pairing.py) writes buttons.json from inside this
+# process now, not only from scripts/setup-zigbee.py run by hand — the
+# directory is root:$MAMAN_USER, setgid (see scripts/install.sh), so a file
+# this service creates is still writable by that script's own account
+# afterwards. The leading "-" matters here for the same reason as above: a
+# brand-new install, before scripts/install.sh has ever created this
+# directory, must still be able to start.
+ReadWritePaths=-/etc/maman-tv-lite
+# Zigbee2MQTT's own configuration: the installation screen's bootstrap
+# (api/zigbee_pairing.py, called from button_pairing.run_bootstrap()) writes
+# the adapter's serial path into it directly, the same file
+# scripts/setup-zigbee.py used to be the only thing allowed to touch. Both
+# services run as the same __MAMAN_USER__ account, so ordinary Unix
+# permissions already allow it; this is the sandbox's own exception, not a
+# permissions fix. The leading "-" matters here too: a brand-new install, or
+# one where MAMAN_ZIGBEE was declined, has no zigbee2mqtt directory at all.
+Environment=MAMAN_Z2M_CONFIG=__MAMAN_HOME__/maman-tv-lite/zigbee2mqtt/data/configuration.yaml
+ReadWritePaths=-__MAMAN_HOME__/maman-tv-lite/zigbee2mqtt/data
+# No video or tty groups here on purpose. They were granted when this service
+# drew the photos itself; it does not any more. fbi needs a console, every
+# console on this board is root:root 0600, and no group opens one — so the
+# groups bought nothing and were removed. The diagnostic screen draws the
+# photos now, and it is already root.
+# ============================================================================
+# This service outranks everything else on the box
+# ----------------------------------------------------------------------------
+# One core, and the background services burn five times what the product does:
+# measured in a day, cloudflared 1644 s, smbd 1547 s, tailscaled 1029 s,
+# against 283 s for this. Nothing told the kernel which of them the owner is
+# actually looking at, so a photo that normally reaches the screen in 3 s took
+# 20.3 s at load 5.4 while Samba was starting, and the music broke up into
+# ALSA underruns at the same moment.
+#
+# CPUWeight only bites when there is contention, which is exactly then; the
+# default is 100 and the background services are pushed down to 20 by drop-ins
+# the installer writes. mpg123 is a child of this service and inherits it;
+# fbi belongs to the screen service, which has a weight of its own.
+#
+# Below Zigbee2MQTT and the broker on purpose. Music that stutters is a poor
+# evening; a button that does nothing is a box that cannot be used at all, and
+# the interface is the buttons. See zigbee2mqtt.service.
+CPUWeight=5000
+IOWeight=1000
+
+Restart=always
+RestartSec=5
+WatchdogSec=30
+TimeoutStopSec=10
+# systemd's default start timeout is 90 s. Measured on a first-generation Pi:
+# the first boot attempt was killed at 90 s while still importing FastAPI from
+# a cold page cache, and only the automatic retry succeeded, delaying the API
+# by a minute and a half. The service is Type=notify, so a generous value
+# costs nothing when startup is quick.
+TimeoutStartSec=300
+
+# Hardening (least privilege)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

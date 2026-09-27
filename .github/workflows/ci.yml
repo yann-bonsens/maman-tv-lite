@@ -1,0 +1,177 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+#
+# Runs on every push and pull request once this repository is on GitHub.
+# Nothing here needs a Raspberry Pi, an adapter or a television: it checks the
+# parts that can be checked without hardware, which is precisely the part a
+# contributor can break without noticing.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The box runs Raspberry Pi OS Lite 13 (Trixie): Python 3.13,
+        # systemd 257. That is the supported platform, and 3.13 is the one
+        # that has to pass. 3.11 is kept as a floor so the code does not
+        # quietly start needing a newer Python than it has to — not as a
+        # claim that an older Debian is supported.
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: api/requirements-dev.txt
+      - name: Install dependencies
+        run: pip install -r api/requirements-dev.txt
+      - name: Run the test suite
+        working-directory: api
+        run: python -m pytest -q
+
+      # Excluded from the default run — they execute real binaries and cost five
+      # times the rest of the suite — so CI is what guarantees they still pass. A
+      # test nobody runs is worse than no test.
+      - name: Run the integration layer
+        working-directory: api
+        run: python -m pytest -q -m integration
+
+      # Pyflakes and the bug-prone patterns, not style. B008 is excluded because
+      # `Query(...)` in a default argument is FastAPI's own idiom.
+      - name: Lint
+        run: ruff check api scripts --select=F,E9,B,C4 --ignore=B008
+
+  scripts:
+    name: Scripts parse and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Derived from what is in the tree, never listed by hand. The list used
+      # to be written out, and it went on naming scripts/net-status.sh for
+      # months after that script was deleted, while missing two that had been
+      # added — the first CI run on this repository failed on the dead name. A
+      # check whose subject is spelled out is a check that rots.
+      #
+      # Losing the executable bit turns the documented `./scripts/install.sh`
+      # into "permission denied", which is a poor first impression.
+      - name: Scripts parse and are executable
+        run: |
+          failed=0
+          for script in $(git ls-files scripts/); do
+            if [ ! -x "$script" ]; then
+              echo "not executable: $script"
+              failed=1
+            fi
+            case "$(head -1 "$script")" in
+              *python*)    python3 -m py_compile "$script" || failed=1 ;;
+              *bash*|*/sh) bash -n "$script"               || failed=1 ;;
+              *) echo "no shebang, so nothing checks it: $script"; failed=1 ;;
+            esac
+          done
+          exit $failed
+
+      - name: ShellCheck
+        # Every shell script in the tree, not the ones whose name happens to end
+        # in .sh: `maman-tv` and `tv-profile` were unchecked for months. Warnings
+        # included rather than errors only — the step up cost exactly one dead
+        # variable, so the old note about warnings being noise no longer holds.
+        run: shellcheck --severity=warning $(git ls-files scripts/ | grep -v '\.py$')
+
+  licence:
+    name: Every file says its licence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # A GPL project whose files do not say so is one nobody can reuse with
+      # confidence. Thirteen tracked files were missing this.
+      - name: SPDX headers
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys
+          from pathlib import Path
+          suffixes = {".py", ".sh", ".service", ".rules", ".yaml", ".yml", ".md"}
+          exempt = {"LICENSE"}
+          # GitHub's templates must begin with their YAML front matter, so a
+          # licence comment cannot go first and would not be read where the
+          # check looks. They are repository metadata, not source.
+          exempt_prefixes = (".github/ISSUE_TEMPLATE/", ".github/PULL_REQUEST_TEMPLATE")
+          tracked = subprocess.run(["git", "ls-files"], capture_output=True,
+                                   text=True, check=True).stdout.split()
+          missing = []
+          for name in tracked:
+              path = Path(name)
+              if name in exempt or name.startswith(exempt_prefixes):
+                  continue
+              if path.suffix not in suffixes and path.suffix != "":
+                  continue
+              try:
+                  head = "".join(path.open(encoding="utf-8").readlines()[:6])
+              except (OSError, UnicodeDecodeError):
+                  continue
+              if path.suffix == "" and not head.startswith("#!"):
+                  continue     # not a script: data, or an example
+              if "SPDX-License-Identifier" not in head:
+                  missing.append(name)
+          if missing:
+              print("No SPDX-License-Identifier in the first six lines of:")
+              print("\n".join(f"  {name}" for name in missing))
+              sys.exit(1)
+          print(f"Clean: {len(tracked)} tracked files.")
+          PY
+
+  english:
+    name: Everything in English
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No accented characters outside the licence
+        # This project is written in English throughout. An accent is the
+        # cheapest reliable signal that a French comment slipped back in; it
+        # caught real cases twice during the initial translation. It cannot
+        # catch unaccented French, so it is a guard, not a proof.
+        run: |
+          python3 - <<'PY'
+          import re, subprocess, sys
+          from pathlib import Path
+
+          # Written as escapes, not as literal accented characters:
+          # otherwise this line would fail its own check.
+          # Latin-1 accented LETTERS, which is what "in English" means here.
+          # The two gaps are deliberate: U+00D7 multiplication and U+00F7
+          # division are mathematical symbols, not accents, and the repository
+          # uses "4.5x" style tables. A pattern that spanned the whole range
+          # rejected seven perfectly English lines.
+          accented = re.compile(r"[\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff\u0152\u0153]")
+          skip = {"LICENSE"}
+          tracked = subprocess.run(
+              ["git", "ls-files"], capture_output=True, text=True, check=True
+          ).stdout.split()
+
+          hits = []
+          for name in tracked:
+              if name in skip:
+                  continue
+              try:
+                  text = Path(name).read_text(encoding="utf-8")
+              except (OSError, UnicodeDecodeError):
+                  continue
+              for number, line in enumerate(text.splitlines(), 1):
+                  if accented.search(line):
+                      hits.append(f"{name}:{number}: {line.strip()[:100]}")
+
+          if hits:
+              print("Accented characters found:")
+              print("\n".join(hits))
+              sys.exit(1)
+          print(f"Clean: {len(tracked)} tracked files.")
+          PY

@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Yann Bonsens
+# Installed by maman-tv-lite's scripts/install.sh; scripts/uninstall.sh removes what carries this line.
+# Maman TV Lite - the box's HDMI connector, forced off while the box is idle.
+#
+# The fallback way of stopping the picture, for a television that ignores the
+# output being blanked. Chosen with `hdmi_sleep: connector` in the box's
+# tv.json; the default is maman-hdmi-blank.service, and it is the default for
+# a reason.
+#
+# What this one costs: forcing the connector off makes the kernel forget the
+# television's EDID, and it can only read it back from a set that answers.
+# A television that electrically unplugs its input while it sleeps never does,
+# so on such a set the box can be left unable to send a single CEC frame until
+# somebody switches the television on by hand. Measured at the installation
+# site on 2026-09-22, and the reason blanking exists at all.
+#
+# Never enabled: there is deliberately no [Install] section. Started at boot it
+# would leave the television with no picture at all.
+
+[Unit]
+Description=Maman TV Lite - HDMI connector forced off while the box is idle
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for c in /sys/class/drm/card*-HDMI-A-*; do [ -e "$c/status" ] && echo off > "$c/status"; done; exit 0'
+ExecStop=/bin/sh -c 'for c in /sys/class/drm/card*-HDMI-A-*; do [ -e "$c/status" ] && echo detect > "$c/status"; done; exit 0'
+TimeoutSec=20

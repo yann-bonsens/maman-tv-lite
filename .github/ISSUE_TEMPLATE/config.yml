@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/yann-bonsens/maman-tv-lite/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.
+  - name: Question, or just not sure
+    url: https://github.com/yann-bonsens/maman-tv-lite/discussions
+    about: Ask anything. "Will this work with my TV?" is a good question.

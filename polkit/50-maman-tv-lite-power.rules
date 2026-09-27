@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Yann Bonsens
+// Lets the account running the Maman TV Lite API reboot and power off the machine
+// without interactive authentication.
+//
+// Why this is needed: maman-api.service runs with NoNewPrivileges=true, which
+// stops `sudo` from working (verified: "sudo: The no new privileges flag is
+// set"). And with no local session, logind answers "challenge" to
+// CanReboot/CanPowerOff — nobody is there to type a password on a machine with
+// no screen and no keyboard.
+//
+// Rather than dropping the service hardening or widening sudo, exactly two
+// actions are granted, to a single account.
+//
+// And two units: maman-hdmi-blank.service and maman-hdmi-disconnect.service,
+// which the box starts to stop driving the television's screen and stops to
+// drive it again. Only "start" and "stop", only those two — the API cannot
+// restart, enable or mask anything, and cannot touch any other service.
+//
+// __MAMAN_USER__ is replaced by scripts/install.sh with the account that ran
+// it. Edit it by hand if you install this rule yourself.
+
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "__MAMAN_USER__") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    switch (action.id) {
+        case "org.freedesktop.login1.reboot":
+        case "org.freedesktop.login1.reboot-multiple-sessions":
+        case "org.freedesktop.login1.power-off":
+        case "org.freedesktop.login1.power-off-multiple-sessions":
+            return polkit.Result.YES;
+    }
+    if (action.id === "org.freedesktop.systemd1.manage-units") {
+        var unit = action.lookup("unit");
+        var verb = action.lookup("verb");
+        if ((unit === "maman-hdmi-blank.service"
+             || unit === "maman-hdmi-disconnect.service")
+            && (verb === "start" || verb === "stop")) {
+            return polkit.Result.YES;
+        }
+    }
+    return polkit.Result.NOT_HANDLED;
+});

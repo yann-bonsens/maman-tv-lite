@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Yann Bonsens
+// Lets the account running the Maman TV Lite API start, stop and restart
+// Zigbee2MQTT without interactive authentication.
+//
+// Why this is needed: maman-api.service runs with NoNewPrivileges=true,
+// which stops `sudo` from working (see 50-maman-tv-lite-power.rules for the
+// measured proof), and there is no local session for logind/polkit to ask.
+//
+// What it is for: the installation screen's own button-pairing bootstrap
+// (api/button_pairing.py, via api/zigbee_pairing.py) finds the Zigbee
+// adapter and needs to bring the bridge up once it has written the
+// adapter's serial path into Zigbee2MQTT's own configuration — and to stop
+// it again if nobody ever responds, so a missing or unrecognised adapter
+// cannot be left crash-looping (though zigbee2mqtt.service's own
+// ConditionPathExistsGlob= already makes that specific failure impossible;
+// this is the belt to that braces).
+//
+// Exactly one unit, exactly three verbs — no enable/disable/mask, and no
+// other unit. Nothing here can be used to (re)start or stop any other
+// service.
+//
+// __MAMAN_USER__ is replaced by scripts/install.sh with the account that
+// ran it. Edit it by hand if you install this rule yourself.
+
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "__MAMAN_USER__") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (action.id === "org.freedesktop.systemd1.manage-units") {
+        var unit = action.lookup("unit");
+        var verb = action.lookup("verb");
+        if (unit === "zigbee2mqtt.service"
+            && (verb === "start" || verb === "stop" || verb === "restart")) {
+            return polkit.Result.YES;
+        }
+    }
+    return polkit.Result.NOT_HANDLED;
+});

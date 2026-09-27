@@ -1,0 +1,9 @@
+fastapi==0.141.1
+uvicorn==0.52.4
+paho-mqtt==2.1.0
+
+# Pillow (the installation screen's page renderer) is deliberately NOT listed
+# here. It has no prebuilt wheel for armv6l, so pip would compile it from
+# source on a Pi 1. install.sh instead installs the Debian-packaged
+# python3-pil and creates the venv with --system-site-packages, which is
+# prebuilt for the board's actual architecture and installs instantly.
